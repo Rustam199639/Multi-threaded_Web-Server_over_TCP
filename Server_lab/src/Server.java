@@ -6,8 +6,10 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 
+import static java.lang.System.out;
+
 public class Server {
-    public static final Map configMap = Server.loadConfiguraionFile("./config/config.ini");
+    public static final Map configMap = Server.loadConfiguraionFile("./config.ini");
     private static String CRLF = "\r\n";
 
     private static Map loadConfiguraionFile(String filePath){
@@ -25,17 +27,17 @@ public class Server {
         return hm;
     }
     public static void main(String[] args) {
-        System.out.println("Server starting...");
+        out.println("Server starting...");
         ServerSocket serverSocket = null;
         Socket client = null;
         InputStream inputStream = null;
         OutputStream outputStream = null;
         try{
             serverSocket = new ServerSocket(Integer.parseInt((String)configMap.get("port")));
-            System.out.println("Server is listening on port " + configMap.get("port"));
+            out.println("Server is listening on port " + configMap.get("port"));
             while(true){
                 client = serverSocket.accept(); // we only use serverSocket to accept the connection
-                System.out.println("New client connected: " + client.getInetAddress().getHostAddress());
+                out.println("New client connected: " + client.getInetAddress().getHostAddress());
                 ClientHandler clientHandler = new ClientHandler(client);
                 Thread thread = new Thread(clientHandler);
                 thread.start();
@@ -49,14 +51,14 @@ public class Server {
         }catch (IOException e){
             e.printStackTrace();
         }finally {
-                try {if (inputStream != null) inputStream.close();}
-                catch (IOException e) {e.printStackTrace();}
-                try {if (outputStream != null) outputStream.close();}
-                catch (IOException e) {e.printStackTrace();}
-                try {if(client != null) client.close();}
-                catch (IOException e) {e.printStackTrace();}
-                try {if (serverSocket != null) serverSocket.close();}
-                catch (IOException e) {e.printStackTrace();}
+            try {if (inputStream != null) inputStream.close();}
+            catch (IOException e) {e.printStackTrace();}
+            try {if (outputStream != null) outputStream.close();}
+            catch (IOException e) {e.printStackTrace();}
+            try {if(client != null) client.close();}
+            catch (IOException e) {e.printStackTrace();}
+            try {if (serverSocket != null) serverSocket.close();}
+            catch (IOException e) {e.printStackTrace();}
         }
     }
     private static class ClientHandler implements Runnable {
@@ -66,14 +68,13 @@ public class Server {
         public ClientHandler(Socket socket) {
             this.clientSocket = socket;
         }
-
+        OutputStream out = null;
         public void run() {
             try {
                 BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-                OutputStream out = clientSocket.getOutputStream();
+                out = clientSocket.getOutputStream();
 
                 String requestLine = reader.readLine(); // Read the request line
-                System.out.println(requestLine);
                 System.out.println(requestLine);
 
                 // Parse requestLine to get method and path...
@@ -105,16 +106,24 @@ public class Server {
                 // Read the file content and determine the content type
                 byte[] content = Files.readAllBytes(file.toPath());
                 String contentType = getContentType(file);
+                Server.sendHttpResponse(out, "200 OK", contentType, content);
 
 
             } catch (IOException e) {
+                try{
+                Server.sendErrorResponse( out,"500 Internal Server Error");
                 e.printStackTrace();
+                } catch (IOException innerException) {
+                    throw new RuntimeException("Failed to send error response", innerException);
+                }
             } finally {
                 // Close resources: reader, out, clientSocket
             }
         }
     }
     private static void sendHttpResponse(OutputStream out, String status, String contentType, byte[] content) throws IOException {
+        System.out.println("Sending Response: " + status + " | Content-Type: " + contentType + " | Content-Length: " + content.length);
+
         PrintWriter headerWriter = new PrintWriter(out, true);
         headerWriter.write("HTTP/1.1 " + status + CRLF);
         headerWriter.write("Content-Type: " + contentType + CRLF);
@@ -126,8 +135,9 @@ public class Server {
         out.flush(); // Ensure all content is written to the OutputStream
     }
     private static void sendErrorResponse(OutputStream out, String status) throws IOException {
-        String response = "HTTP/1.1 " + status + CRLF +"Content-Type: text/html"+CRLF+CRLF+"<html><body><h1>" + status + "</h1></body></html>";
-        out.write(response.getBytes());
+            System.out.println("Sending Error Response: " + status);
+            String response = "HTTP/1.1 " + status + CRLF + "Content-Type: text/html" + CRLF + CRLF + "<html><body><h1>" + status + "</h1></body></html>";
+            out.write(response.getBytes());
     }
     private static String getContentType(File file) {
         String fileName = file.getName();
