@@ -1,7 +1,6 @@
 import java.io.*;
 import java.net.*;
 import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
@@ -69,12 +68,17 @@ public class Server {
             this.clientSocket = socket;
         }
         OutputStream out = null;
+        BufferedReader reader = null;
         public void run() {
             try {
-                BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+                reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
                 out = clientSocket.getOutputStream();
 
-                String requestLine = reader.readLine(); // Read the request line
+                String requestLine = reader.readLine(); // Read the request lin
+                if (requestLine == null || requestLine.isEmpty()) {
+                    System.out.println("Empty line was received");
+                    return;
+                }
                 System.out.println(requestLine);
 
                 // Parse requestLine to get method and path...
@@ -87,28 +91,40 @@ public class Server {
                 // Based on the path, serve the appropriate file or error response
                 // Use sendHttpResponse to send the file content or error message
 
-                // Simple handling for GET requests only in this example
-                if (!method.equals("GET")) {
+                String rootDirectory = "";
+                if (method.equals("GET")) {
+                    rootDirectory = (String) configMap.get("root"); // Ensure this is "~/www/lab/html/"
+                    String resolvedPath = path.equals("/") ? rootDirectory + configMap.get("defaultPage") : rootDirectory + path;
+                    String filePath = URLDecoder.decode(resolvedPath, "UTF-8");
+                    File file = new File(filePath);
+
+                    if (!file.exists() || file.isDirectory()) {
+                        sendErrorResponse(out, "404 Not Found");
+                        return;
+                    }
+
+                    // Read the file content and determine the content type
+                    byte[] content = Files.readAllBytes(file.toPath());
+                    String contentType = getContentType(file);
+                    Server.sendHttpResponse(out, "200 OK", contentType, content);
+                }else if (method.equals("POST")){
+                    rootDirectory = (String) configMap.get("root"); // Ensure this is "~/www/lab/html/"
+                    String resolvedPath = path.equals("/") ? rootDirectory + configMap.get("defaultPage") : rootDirectory + path;
+                    String filePath = URLDecoder.decode(resolvedPath, "UTF-8");
+                    File file = new File(filePath);
+
+                    if (!file.exists() || file.isDirectory()) {
+                        sendErrorResponse(out, "404 Not Found");
+                        return;
+                    }
+
+                    // Read the file content and determine the content type
+                    byte[] content = Files.readAllBytes(file.toPath());
+                    String contentType = getContentType(file);
+                    Server.sendHttpResponse(out, "200 OK", contentType, content);
+                }else {
                     sendErrorResponse(out, "501 Not Implemented");
-                    return;
                 }
-
-                String rootDirectory = (String) configMap.get("root"); // Ensure this is "~/www/lab/html/"
-                String resolvedPath = path.equals("/") ? rootDirectory + configMap.get("defaultPage") : rootDirectory + path;
-                String filePath = URLDecoder.decode(resolvedPath, "UTF-8");
-                File file = new File(filePath);
-
-                if (!file.exists() || file.isDirectory()) {
-                    sendErrorResponse(out, "404 Not Found");
-                    return;
-                }
-
-                // Read the file content and determine the content type
-                byte[] content = Files.readAllBytes(file.toPath());
-                String contentType = getContentType(file);
-                Server.sendHttpResponse(out, "200 OK", contentType, content);
-
-
             } catch (IOException e) {
                 try{
                 Server.sendErrorResponse( out,"500 Internal Server Error");
@@ -118,22 +134,30 @@ public class Server {
                 }
             } finally {
                 // Close resources: reader, out, clientSocket
+                try{
+                    reader.close();
+                    out.close();
+                    clientSocket.close();
+                }catch (IOException e){
+                    throw new RuntimeException("Failed to close Client thread", e);
+                }
             }
         }
     }
     private static void sendHttpResponse(OutputStream out, String status, String contentType, byte[] content) throws IOException {
-        System.out.println("Sending Response: " + status + " | Content-Type: " + contentType + " | Content-Length: " + content.length);
+        String header = "HTTP/1.1 " + status + CRLF +
+                "Content-Type: " + contentType + CRLF +
+                "Content-Length: " + content.length + CRLF + CRLF;
+        System.out.println(header); // Print the header to the console
 
         PrintWriter headerWriter = new PrintWriter(out, true);
-        headerWriter.write("HTTP/1.1 " + status + CRLF);
-        headerWriter.write("Content-Type: " + contentType + CRLF);
-        headerWriter.write("Content-Length: " + content.length + CRLF);
-        headerWriter.write(CRLF); // Blank line between headers and content, very important!
+        headerWriter.write(header); // Write the header to the OutputStream
         headerWriter.flush(); // Flush the headers to the OutputStream
 
         out.write(content); // Write the file content directly to the output stream
         out.flush(); // Ensure all content is written to the OutputStream
     }
+
     private static void sendErrorResponse(OutputStream out, String status) throws IOException {
             System.out.println("Sending Error Response: " + status);
             String response = "HTTP/1.1 " + status + CRLF + "Content-Type: text/html" + CRLF + CRLF + "<html><body><h1>" + status + "</h1></body></html>";
